@@ -1,0 +1,75 @@
+const express = require('express');
+const router = express.Router();
+const pool = require('../config/db');
+
+// GET /items/byCreatorId/:creatorId
+router.get('/byCreatorId/:creatorId', async (req, res) => {
+   try {
+    const { creatorId } = req.params;
+
+    const query = `
+      SELECT
+        items.*,
+        CONCAT(creators.first_name, ' ', creators.last_name) AS creator_name,
+        creators.phone AS creator_phone,
+        creators.profile_image AS creator_image,
+        creators.store_name,
+        creators.deliveryValue,
+        creators.cover_photo,
+        restaurant_item_details.time AS restaurant_time,
+        restaurant_item_details.ingredients AS restaurant_ingredients,
+        hs_item_details.working_time AS hs_working_time,
+        hs_item_details.behance_link AS hs_behance_link,
+        hs_item_details.portfolio_links AS hs_portfolio_links,
+        tutoring_item_details.course_duration AS tutoring_course_duration,
+        tutoring_item_details.syllabus AS tutoring_syllabus,
+        
+        -- **الحقول الجديدة لـ Hand Crafter (profession_id = 4)**
+        -- ملاحظة: في كود التحديث، Hand Crafter يستخدم 'time' وليس 'working_time'.
+        -- إذا كنت تريد 'working_time' يجب التأكد من وجوده في جدول hc_item_details.
+        hc_item_details.time AS hc_time,
+        hc_item_details.ingredients AS hc_ingredients,
+        hc_item_details.additional_data AS hc_additional_data,
+
+        -- **الحقول الجديدة لـ Freelancer (profession_id = 5)**
+        freelancer_item_details.working_time AS freelancer_working_time,
+        freelancer_item_details.portfolio_links AS freelancer_portfolio_links
+      FROM items
+      INNER JOIN creators ON items.creator_id = creators.id
+      LEFT JOIN restaurant_item_details ON items.id = restaurant_item_details.item_id
+      LEFT JOIN hs_item_details         ON items.id = hs_item_details.item_id
+      LEFT JOIN tutoring_item_details   ON items.id = tutoring_item_details.item_id
+      
+      -- **الـ JOINs الجديدة للجداول المطلوبة**
+      LEFT JOIN hc_item_details         ON items.id = hc_item_details.item_id
+      LEFT JOIN freelancer_item_details ON items.id = freelancer_item_details.item_id
+      WHERE items.creator_id = ?
+    `;
+
+
+
+
+    const [results] = await pool.query(query, [creatorId]);
+
+    if (results.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No items found for this creator'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: results
+    });
+  } catch (error) {
+    console.error('Database error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+module.exports = router;

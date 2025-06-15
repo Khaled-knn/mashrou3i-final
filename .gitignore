@@ -1,0 +1,9 @@
+node_modules/
+.env
+npm-debug.log
+logs/
+*.sqlite
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+config/serviceAccountKey.json

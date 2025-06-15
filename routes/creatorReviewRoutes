@@ -1,0 +1,48 @@
+const express = require('express');
+const router = express.Router();
+const pool = require('../config/db');
+
+router.post('/put', async (req, res) => {
+  try {
+    const { creator_id, user_id, rating, comment } = req.body;
+
+    if (!creator_id || !user_id || !rating) {
+      return res.status(400).json({ success: false, message: 'Missing required fields' });
+    }
+
+    if (rating < 1 || rating > 5) {
+      return res.status(400).json({ success: false, message: 'Rating must be between 1 and 5' });
+    }
+
+    // تحقق إذا التقييم موجود
+    const [existing] = await pool.query(
+      `SELECT * FROM creator_reviews WHERE creator_id = ? AND user_id = ?`,
+      [creator_id, user_id]
+    );
+
+    if (existing.length > 0) {
+      // حدث التقييم
+      await pool.query(
+        `UPDATE creator_reviews 
+         SET rating = ?, comment = ?, created_at = NOW() 
+         WHERE creator_id = ? AND user_id = ?`,
+        [rating, comment || null, creator_id, user_id]
+      );
+      res.json({ success: true, message: 'Review updated successfully' });
+    } else {
+      // أدخل تقييم جديد
+      await pool.query(
+        `INSERT INTO creator_reviews (creator_id, user_id, rating, comment, created_at)
+         VALUES (?, ?, ?, ?, NOW())`,
+        [creator_id, user_id, rating, comment || null]
+      );
+      res.json({ success: true, message: 'Review submitted successfully' });
+    }
+  } catch (error) {
+    console.error('Error adding/updating review:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+
+module.exports = router;
