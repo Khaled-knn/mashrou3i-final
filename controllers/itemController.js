@@ -11,7 +11,7 @@ const addItem = async (req, res) => {
             price,
             pictures = [],
             description = null,
-            
+
             time = null,
             ingredients = [],
             additional_data = null,
@@ -139,264 +139,260 @@ const addItem = async (req, res) => {
 
 
 const searchItems = async (req, res) => {
-    try {
-        const {
-            query, // نص البحث
-            professionId, // id المهنة المحدد للفلترة
-            minRate, // الحد الأدنى للتقييم (إذا كان عندك تقييم للـ items أو للـ creators)
-            freeDelivery, // للتوصيل المجاني (خاص بالمطاعم/المحلات)
-            hasOffer, // إذا كان في عرض
-            isOpenNow, // إذا المحل مفتوح حالياً
-            limit = 10, // عدد النتائج في الصفحة الواحدة
-            offset = 0, // الإزاحة (كم نتيجة تتخطاها)
-            // أي فلاتر إضافية حسب الـ profession_id
-            time, // وقت تحضير الوجبة (للمطاعم و Hand Crafter)
-            working_time, // أوقات العمل (لـ HS و Freelancer)
-            course_duration, // مدة الدورة (لـ Tutoring)
-        } = req.query; // استخدم req.query لاستقبال الـ query parameters
+  try {
+    const {
+      query,
+      professionId,
+      minRate,
+      limit = 20,
+      offset = 0,
+      time,
+      working_time,
+      course_duration,
+    } = req.query;
 
-        let sqlQueryParts = [];
-        let queryParams = [];
+    let globalWhereParts = [];
+    let globalQueryParams = [];
 
-        // الشرط الأساسي: البحث عن طريق اسم الـ item
-        if (query) {
-            // بحث عن أي جزء من الكلمة في الاسم
-            // ممكن تحتاج تستخدم COLLATE عشان تتأكد إنو البحث غير حساس لحالة الأحرف (case-insensitive) بالعربي
-            sqlQueryParts.push(`i.name LIKE ?`);
-            queryParams.push(`%${query}%`);
-        }
-
-        // فلترة حسب الـ profession_id
-        if (professionId) {
-            // لازم تتأكد إنو professionId رقم صحيح
-            const parsedProfessionId = parseInt(professionId);
-            if (!isNaN(parsedProfessionId)) {
-                sqlQueryParts.push(`i.profession_id = ?`);
-                queryParams.push(parsedProfessionId);
-            }
-        }
-
-        // بناء استعلام البحث الشامل
-        // هذا الاستعلام رح يعمل JOIN بين جدول الـ items والجداول التفصيلية
-        // ورح يستخدم LEFT JOIN عشان يرجع الـ items حتى لو ما كان إلها تفاصيل في كل الجداول
-        // استخدام UNION ALL أفضل لما بتكون بتجمع نتائج من جداول مختلفة تماماً (مثلاً لو بتبحث عن مطاعم ومنتجات بشكل منفصل)
-        // لكن بما إنو الـ items هي الأساس وتفاصيلها بتتوزع، ممكن نستخدم LEFT JOIN مع شروط WHERE
-        // أو نكتب استعلامات منفصلة لكل نوع ونجمعها في الـ Node.js
-        // الطريقة الثانية (استعلامات منفصلة ودمج في Node.js) بتكون أسهل للفلترة المعقدة
-
-        let allResults = [];
-
-        // ---- 1. بحث المطاعم (profession_id 1, 2) و Hand Crafter (profession_id 4)
-        // بما أن restaurant_item_details و hc_item_details لهم نفس حقول time و ingredients
-        if (!professionId || [1, 2, 4].includes(parseInt(professionId))) {
-            let itemDetailsTable = '';
-            let itemDetailsSelect = '';
-            let itemDetailsWhere = [];
-
-            // تحديد الجدول التفصيلي بناءً على الـ professionId المحدد
-            // إذا لم يتم تحديد professionId، سنقوم بالبحث في كليهما أو افتراض الأكثر شيوعاً للمثال
-            // للمثال: سنفصلهم ليكون أوضح
-            if (!professionId || parseInt(professionId) === 1 || parseInt(professionId) === 2) { // Restaurants
-                itemDetailsTable = 'restaurant_item_details';
-                itemDetailsSelect = ', rid.time, rid.ingredients';
-                if (time) itemDetailsWhere.push(`rid.time = ?`);
-            } else if (parseInt(professionId) === 4) { // Hand Crafter
-                itemDetailsTable = 'hc_item_details';
-                itemDetailsSelect = ', hcd.time, hcd.ingredients, hcd.additional_data';
-                if (time) itemDetailsWhere.push(`hcd.time = ?`);
-            }
-
-
-            let restaurantQuery = `
-                SELECT 
-                    i.id, i.name, i.price, i.description, i.pictures, i.profession_id,
-                    c.name AS creator_name, c.rating, c.has_free_delivery, c.has_offer, c.is_open_now
-                    ${itemDetailsSelect}
-                FROM items i
-                JOIN creators c ON i.creator_id = c.id
-            `;
-            if (itemDetailsTable) {
-                 // استخدام UNION ALL لدمج النتائج من تفاصيل المطاعم و Hand Crafter
-                 // هذا النهج أفضل لتوحيد النتائج
-                 let restaurantWhere = sqlQueryParts.slice(); // نسخ شروط البحث العامة
-                 let restaurantQueryParams = queryParams.slice(); // نسخ البارامترات العامة
-
-                 // فلترة حسب الـ profession_id للمطاعم
-                 if (parseInt(professionId) === 1 || parseInt(professionId) === 2) {
-                     restaurantWhere.push(`i.profession_id IN (1, 2)`);
-                 } else if (parseInt(professionId) === 4) {
-                     restaurantWhere.push(`i.profession_id = 4`);
-                 } else { // إذا لم يتم تحديد professionId، ابحث في كليهما
-                     restaurantWhere.push(`i.profession_id IN (1, 2, 4)`);
-                 }
-
-                 if (minRate) {
-                     restaurantWhere.push(`c.rating >= ?`);
-                     restaurantQueryParams.push(parseFloat(minRate));
-                 }
-                 if (freeDelivery === 'true') { // قيم الـ query param بتكون String
-                     restaurantWhere.push(`c.has_free_delivery = TRUE`);
-                 }
-                 if (hasOffer === 'true') {
-                     restaurantWhere.push(`c.has_offer = TRUE`);
-                 }
-                 if (isOpenNow === 'true') {
-                     restaurantWhere.push(`c.is_open_now = TRUE`);
-                 }
-
-                 // بناء الـ WHERE clause
-                 let whereClause = restaurantWhere.length > 0 ? `WHERE ${restaurantWhere.join(' AND ')}` : '';
-
-                 // استعلام للمطاعم
-                 if (!professionId || parseInt(professionId) === 1 || parseInt(professionId) === 2) {
-                     let restQuery = `
-                        SELECT
-                            i.id, i.name, i.price, i.description, i.pictures, i.profession_id,
-                            'restaurant' as item_type, // نضيف نوع لسهولة التعامل في Flutter
-                            c.name AS creator_name, c.rating, c.has_free_delivery, c.has_offer, c.is_open_now,
-                            rid.time, rid.ingredients
-                        FROM items i
-                        JOIN creators c ON i.creator_id = c.id
-                        LEFT JOIN restaurant_item_details rid ON i.id = rid.item_id
-                        ${whereClause} ${whereClause ? 'AND' : 'WHERE'} i.profession_id IN (1, 2)
-                        ${time ? `AND rid.time = ?` : ''}
-                        LIMIT ? OFFSET ?
-                    `;
-                    const [rowsRest] = await db.execute(restQuery, [
-                        ...restaurantQueryParams,
-                        ...(time ? [time] : []),
-                        parseInt(limit), parseInt(offset)
-                    ]);
-                    allResults.push(...rowsRest);
-                 }
-
-
-                 // استعلام لـ Hand Crafter
-                 if (!professionId || parseInt(professionId) === 4) {
-                     let hcQuery = `
-                        SELECT
-                            i.id, i.name, i.price, i.description, i.pictures, i.profession_id,
-                            'hand_crafter' as item_type, // نضيف نوع لسهولة التعامل في Flutter
-                            c.name AS creator_name, c.rating, c.has_free_delivery, c.has_offer, c.is_open_now,
-                            hcd.time, hcd.ingredients, hcd.additional_data
-                        FROM items i
-                        JOIN creators c ON i.creator_id = c.id
-                        LEFT JOIN hc_item_details hcd ON i.id = hcd.item_id
-                        ${whereClause} ${whereClause ? 'AND' : 'WHERE'} i.profession_id = 4
-                        ${time ? `AND hcd.time = ?` : ''}
-                        LIMIT ? OFFSET ?
-                    `;
-                    const [rowsHC] = await db.execute(hcQuery, [
-                        ...restaurantQueryParams, // نستخدم نفس البارامترات العامة للمطاعم هنا
-                        ...(time ? [time] : []),
-                        parseInt(limit), parseInt(offset)
-                    ]);
-                    allResults.push(...rowsHC);
-                 }
-            }
-        }
-
-        // ---- 2. بحث HS (profession_id 3)
-        if (!professionId || parseInt(professionId) === 3) {
-            let hsWhere = sqlQueryParts.slice();
-            let hsQueryParams = queryParams.slice();
-
-            hsWhere.push(`i.profession_id = 3`);
-            if (minRate) { hsWhere.push(`c.rating >= ?`); hsQueryParams.push(parseFloat(minRate)); }
-            if (hasOffer === 'true') { hsWhere.push(`c.has_offer = TRUE`); }
-            if (working_time) { hsWhere.push(`hsd.working_time = ?`); hsQueryParams.push(working_time); } // افتراضاً working_time موجود في hs_item_details
-
-            let hsQuery = `
-                SELECT
-                    i.id, i.name, i.price, i.description, i.pictures, i.profession_id,
-                    'hand_service' as item_type,
-                    c.name AS creator_name, c.rating, c.has_free_delivery, c.has_offer, c.is_open_now,
-                    hsd.working_time, hsd.behance_link, hsd.portfolio_links
-                FROM items i
-                JOIN creators c ON i.creator_id = c.id
-                LEFT JOIN hs_item_details hsd ON i.id = hsd.item_id
-                ${hsWhere.length > 0 ? `WHERE ${hsWhere.join(' AND ')}` : ''}
-                LIMIT ? OFFSET ?
-            `;
-            const [rowsHS] = await db.execute(hsQuery, [...hsQueryParams, parseInt(limit), parseInt(offset)]);
-            allResults.push(...rowsHS);
-        }
-
-        // ---- 3. بحث Freelancer (profession_id 5)
-        if (!professionId || parseInt(professionId) === 5) {
-            let freelancerWhere = sqlQueryParts.slice();
-            let freelancerQueryParams = queryParams.slice();
-
-            freelancerWhere.push(`i.profession_id = 5`);
-            if (minRate) { freelancerWhere.push(`c.rating >= ?`); freelancerQueryParams.push(parseFloat(minRate)); }
-            if (hasOffer === 'true') { freelancerWhere.push(`c.has_offer = TRUE`); }
-            if (working_time) { freelancerWhere.push(`fid.working_time = ?`); freelancerQueryParams.push(working_time); } // افتراضاً working_time موجود في freelancer_item_details
-
-            let freelancerQuery = `
-                SELECT
-                    i.id, i.name, i.price, i.description, i.pictures, i.profession_id,
-                    'freelancer' as item_type,
-                    c.name AS creator_name, c.rating, c.has_free_delivery, c.has_offer, c.is_open_now,
-                    fid.working_time, fid.portfolio_links
-                FROM items i
-                JOIN creators c ON i.creator_id = c.id
-                LEFT JOIN freelancer_item_details fid ON i.id = fid.item_id
-                ${freelancerWhere.length > 0 ? `WHERE ${freelancerWhere.join(' AND ')}` : ''}
-                LIMIT ? OFFSET ?
-            `;
-            const [rowsFreelancer] = await db.execute(freelancerQuery, [...freelancerQueryParams, parseInt(limit), parseInt(offset)]);
-            allResults.push(...rowsFreelancer);
-        }
-
-        // ---- 4. بحث Tutoring (profession_id 6)
-        if (!professionId || parseInt(professionId) === 6) {
-            let tutoringWhere = sqlQueryParts.slice();
-            let tutoringQueryParams = queryParams.slice();
-
-            tutoringWhere.push(`i.profession_id = 6`);
-            if (minRate) { tutoringWhere.push(`c.rating >= ?`); tutoringQueryParams.push(parseFloat(minRate)); }
-            if (hasOffer === 'true') { tutoringWhere.push(`c.has_offer = TRUE`); }
-            if (course_duration) { tutoringWhere.push(`tid.course_duration = ?`); tutoringQueryParams.push(course_duration); } // افتراضاً course_duration موجود في tutoring_item_details
-
-            let tutoringQuery = `
-                SELECT
-                    i.id, i.name, i.price, i.description, i.pictures, i.profession_id,
-                    'tutoring' as item_type,
-                    c.name AS creator_name, c.rating, c.has_free_delivery, c.has_offer, c.is_open_now,
-                    tid.course_duration, tid.syllabus, tid.google_drive_link
-                FROM items i
-                JOIN creators c ON i.creator_id = c.id
-                LEFT JOIN tutoring_item_details tid ON i.id = tid.item_id
-                ${tutoringWhere.length > 0 ? `WHERE ${tutoringWhere.join(' AND ')}` : ''}
-                LIMIT ? OFFSET ?
-            `;
-            const [rowsTutoring] = await db.execute(tutoringQuery, [...tutoringQueryParams, parseInt(limit), parseInt(offset)]);
-            allResults.push(...rowsTutoring);
-        }
-
-
-        // بما أن كل استعلام بيرجع عدد محدد من النتائج (limit)، فممكن يكون مجموع النتائج أكثر من الـ limit الأصلي
-        // لذلك ممكن تعمل ترتيب وتحديد (limit) بعد تجميع كل النتائج، أو تعتمد على Pagination على مستوى كل نوع
-        // للتبسيط في هذا المثال، سنرجع كل ما تم تجميعه.
-
-        // ممكن تعمل فرز إضافي للـ allResults بناءً على الصلة (relevance) أو أي معيار آخر
-        // مثلاً: allResults.sort((a, b) => b.rating - a.rating);
-
-        res.status(200).json({
-            success: true,
-            results: allResults,
-            total: allResults.length // ممكن تعمل استعلام COUNT لكل نوع أيضاً لتحصل على العدد الكلي قبل الـ limit
-        });
-
-    } catch (error) {
-        console.error('Error during search:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Internal server error',
-            details: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
+    if (query) {
+      globalWhereParts.push(
+        `(LOWER(i.name) LIKE LOWER(?) OR LOWER(CONCAT(c.first_name, ' ', c.last_name)) LIKE LOWER(?))`
+      );
+      globalQueryParams.push(`%${query}%`, `%${query}%`);
     }
+
+    if (minRate) {
+      globalWhereParts.push(`c.rate >= ?`);
+      globalQueryParams.push(parseFloat(minRate));
+    }
+
+    let unionQueries = [];
+    let allUnionQueryParams = [];
+
+    const allDetailColumns = [
+      "time",
+      "ingredients",
+      "additional_data",
+      "working_time",
+      "behance_link",
+      "portfolio_links",
+      "course_duration",
+      "syllabus",
+      "google_drive_link",
+    ];
+
+    const buildSingleProfessionQuery = (profIds, detailTable, detailAlias) => {
+      let selectDetailsArray = [];
+      let joinClause = "";
+      let specificWhereParts = [];
+      let specificQueryParams = [];
+
+      if (detailTable) {
+        joinClause = `LEFT JOIN ${detailTable} ${detailAlias} ON i.id = ${detailAlias}.item_id`;
+      }
+
+      const columnsFromDetailTable = [];
+      if (profIds.includes(1) || profIds.includes(2)) {
+        columnsFromDetailTable.push("time", "ingredients");
+        if (time) {
+          specificWhereParts.push(`${detailAlias}.time = ?`);
+          specificQueryParams.push(time);
+        }
+      } else if (profIds.includes(4)) {
+        columnsFromDetailTable.push("time", "ingredients", "additional_data");
+        if (time) {
+          specificWhereParts.push(`${detailAlias}.time = ?`);
+          specificQueryParams.push(time);
+        }
+      } else if (profIds.includes(3)) {
+        columnsFromDetailTable.push("working_time", "behance_link", "portfolio_links");
+        if (working_time) {
+          specificWhereParts.push(`${detailAlias}.working_time = ?`);
+          specificQueryParams.push(working_time);
+        }
+      } else if (profIds.includes(5)) {
+        columnsFromDetailTable.push("working_time", "portfolio_links");
+        if (working_time) {
+          specificWhereParts.push(`${detailAlias}.working_time = ?`);
+          specificQueryParams.push(working_time);
+        }
+      } else if (profIds.includes(6)) {
+        columnsFromDetailTable.push("course_duration", "syllabus", "google_drive_link");
+        if (course_duration) {
+          specificWhereParts.push(`${detailAlias}.course_duration = ?`);
+          specificQueryParams.push(course_duration);
+        }
+      }
+
+      for (const col of allDetailColumns) {
+        if (columnsFromDetailTable.includes(col)) {
+          selectDetailsArray.push(`${detailAlias}.${col}`);
+        } else {
+          selectDetailsArray.push(`NULL AS ${col}`);
+        }
+      }
+
+      const selectDetails = selectDetailsArray.join(", ");
+      let currentWhereParts = [...globalWhereParts];
+      let currentQueryParams = [...globalQueryParams];
+
+      if (profIds.length === 1) {
+        currentWhereParts.push(`i.profession_id = ?`);
+        currentQueryParams.push(profIds[0]);
+      } else {
+        currentWhereParts.push(`i.profession_id IN (${profIds.map(() => "?").join(", ")})`);
+        currentQueryParams.push(...profIds);
+      }
+
+      if (specificWhereParts.length > 0) {
+        currentWhereParts.push(...specificWhereParts);
+      }
+
+      allUnionQueryParams.push(...currentQueryParams, ...specificQueryParams);
+
+      const whereClause = currentWhereParts.length > 0 ? `WHERE ${currentWhereParts.join(" AND ")}` : "";
+
+      return `
+      SELECT
+          i.id, i.name, i.price, i.description, i.pictures, i.profession_id, i.creator_id,
+          CONCAT(c.first_name, ' ', c.last_name) AS creator_name,
+          c.rate AS rating,
+          c.profile_image AS creator_image,
+          c.phone AS creator_phone,
+          c.store_name AS store_name,
+          c.deliveryValue AS delivery_value,
+          c.cover_photo AS cover_photo
+          ${selectDetails ? ", " + selectDetails : ""}
+      FROM items i
+      JOIN creators c ON i.creator_id = c.id
+      ${joinClause}
+      ${whereClause}
+    `;
+    };
+
+    const parsedProfessionId = professionId ? parseInt(professionId) : null;
+
+    if (!parsedProfessionId || [1, 2].includes(parsedProfessionId)) {
+      unionQueries.push(buildSingleProfessionQuery([1, 2], "restaurant_item_details", "rid"));
+    }
+    if (!parsedProfessionId || parsedProfessionId === 4) {
+      unionQueries.push(buildSingleProfessionQuery([4], "hc_item_details", "hcd"));
+    }
+    if (!parsedProfessionId || parsedProfessionId === 3) {
+      unionQueries.push(buildSingleProfessionQuery([3], "hs_item_details", "hsd"));
+    }
+    if (!parsedProfessionId || parsedProfessionId === 5) {
+      unionQueries.push(buildSingleProfessionQuery([5], "freelancer_item_details", "fid"));
+    }
+    if (!parsedProfessionId || parsedProfessionId === 6) {
+      unionQueries.push(buildSingleProfessionQuery([6], "tutoring_item_details", "tid"));
+    }
+
+    if (unionQueries.length === 0) {
+      return res.status(200).json({ success: true, results: [], total: 0 });
+    }
+
+    let fullQuery = unionQueries.join(" UNION ALL ");
+    fullQuery += ` ORDER BY creator_name ASC, name ASC LIMIT ? OFFSET ?;`;
+    allUnionQueryParams.push(parseInt(limit), parseInt(offset));
+
+    // تنفيذ الاستعلام الأساسي لجلب المنتجات مع منشئيها
+    const [results] = await db.execute(fullQuery, allUnionQueryParams);
+
+    if (results.length === 0) {
+      return res.status(200).json({ success: true, results: [], total: 0 });
+    }
+
+    // جمع معرفات المنشئين من النتائج
+    const creatorIds = [...new Set(results.map((item) => item.creator_id))];
+
+    // جلب البيانات المكملة للمنشئين دفعة واحدة
+    const [availability] = await db.query(
+      "SELECT * FROM creator_availability WHERE creator_id IN (?)",
+      [creatorIds]
+    );
+    const [offers] = await db.query(
+      "SELECT * FROM creator_offers WHERE creator_id IN (?)",
+      [creatorIds]
+    );
+    const [paymentMethods] = await db.query(
+      "SELECT * FROM creator_payment_methods WHERE creator_id IN (?)",
+      [creatorIds]
+    );
+    const [addresses] = await db.query(
+      "SELECT creator_id, city, country, street FROM addresses WHERE creator_id IN (?)",
+      [creatorIds]
+    );
+    const [rates] = await db.query(
+      `SELECT creator_id, COUNT(*) AS rate_count, ROUND(AVG(rating), 2) AS average_rate
+       FROM creator_reviews WHERE creator_id IN (?) GROUP BY creator_id`,
+      [creatorIds]
+    );
+
+    // دوال مساعدة لجلب التقييمات
+    const getRateCount = (cid) => rates.find((r) => r.creator_id === cid)?.rate_count || 0;
+    const getAverageRate = (cid) => rates.find((r) => r.creator_id === cid)?.average_rate || 0;
+
+    // دمج البيانات مع كل منتج
+    results.forEach((item) => {
+      const cid = item.creator_id;
+
+      item.availability = availability
+        .filter((a) => a.creator_id === cid)
+        .map((a) => ({
+          type: a.type,
+          open_at: a.open_at,
+          close_at: a.close_at,
+          days: a.days ? JSON.parse(a.days) : null,
+        }));
+
+      item.offers = offers
+        .filter((o) => o.creator_id === cid)
+        .map((o) => ({
+          type: o.offer_type,
+          value: o.offer_value,
+          start: o.offer_start,
+          end: o.offer_end,
+        }));
+
+      item.payment_methods = paymentMethods
+        .filter((p) => p.creator_id === cid)
+        .map((p) => ({
+          method: p.method,
+          account_info: p.account_info,
+        }));
+
+      const address = addresses.find((addr) => addr.creator_id === cid);
+      item.address = address
+        ? {
+            city: address.city,
+            street: address.street,
+            country: address.country,
+          }
+        : null;
+
+      item.rate_count = getRateCount(cid);
+      item.rating = getAverageRate(cid);
+    });
+
+    res.status(200).json({
+      success: true,
+      results,
+      total: results.length,
+    });
+  } catch (error) {
+    console.error("Error during search:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      details: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
 };
+
+
+
+module.exports = { searchItems };
 
 
 module.exports = {

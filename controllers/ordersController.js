@@ -1,6 +1,7 @@
 const db = require('../config/db');
 const sendNotification = require('../controllers/notificationHelper');
 
+
 exports.placeOrder = async (req, res) => {
     const user_id = req.user.id;
     const {
@@ -392,6 +393,9 @@ exports.updateOrderStatus = async (req, res) => {
 };
 
 
+ 
+
+
 exports.acceptOrCancelOrder = async (req, res) => {
     const { orderId } = req.params;
     const { status, delivery_time_value, delivery_time_unit } = req.body;
@@ -516,10 +520,12 @@ exports.acceptOrCancelOrder = async (req, res) => {
 };
 
 
+
+
 exports.userConfirmsPayment = async (req, res) => {
     const { orderId } = req.params;
-    const { payment_method } = req.body; // المستخدم يؤكد وسيلة الدفع هنا
-    const user_id = req.user.id; // المستخدم الذي يؤكد الدفع
+    const { payment_method } = req.body; 
+    const user_id = req.user.id; 
 
     if (!payment_method) {
         return res.status(400).json({ success: false, message: "Payment method is required." });
@@ -646,6 +652,8 @@ exports.userConfirmsPayment = async (req, res) => {
 };
 
 
+
+
 exports.getCreatorOrders = async (req, res) => {
     const creator_id = req.user.id;
     let connection;
@@ -736,11 +744,11 @@ exports.getCreatorOrders = async (req, res) => {
 };
 
 
+
+
+
 exports.getUserOrders = async (req, res) => {
-    // استخدم req.user.id إذا كنت تستخدم protect middleware لحماية هذا المسار
-    // وإلا فاستخدم req.params.userId كما في الكود الحالي
-    const userId = req.user.id; // الأفضل استخدام هذا إذا كان المستخدم موثقاً
-    // const userId = req.params.userId; // إذا كنت تستخدم البارامتر بدلاً من التوثيق
+    const userId = req.user.id;
 
     console.log('طلب جديد لجلب الطلبات للمستخدم:', userId);
 
@@ -838,6 +846,7 @@ exports.getUserOrders = async (req, res) => {
         if (connection) connection.release();
     }
 };
+
 
 
 

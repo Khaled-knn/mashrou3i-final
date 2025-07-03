@@ -2,6 +2,11 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 
+
+
+
+
+
 // GET /items/byCreatorId/:creatorId
 router.get('/byCreatorId/:creatorId', async (req, res) => {
    try {
@@ -71,5 +76,7 @@ router.get('/byCreatorId/:creatorId', async (req, res) => {
     });
   }
 });
+
+
 
 module.exports = router;

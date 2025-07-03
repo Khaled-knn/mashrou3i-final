@@ -43,7 +43,7 @@ exports.register = async (req, res) => {
     const token = jwt.sign(
       { id: newUser.id, email: newUser.email },
       process.env.JWT_SECRET || 'your_jwt_secret',
-      { expiresIn: '30d' }
+      { expiresIn: '90d' }
     );
 
     // Send verification email
